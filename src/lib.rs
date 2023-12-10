@@ -48,26 +48,27 @@ use crate::interval::*;
 use crate::shared::Shared;
 
 #[derive(Clone, Hash)]
-struct Node<T: Ord + Clone> {
-    interval: Interval<T>,
-    left: Option<Shared<Node<T>>>,
-    right: Option<Shared<Node<T>>>,
+struct Node<B: Ord + Clone, D: ToInterval<B> + Clone> {
+    data: D,
+    left: Option<Shared<Node<B, D>>>,
+    right: Option<Shared<Node<B, D>>>,
     height: usize,
-    max: Shared<Bound<T>>,
-    min: Shared<Bound<T>>,
+    max: Shared<Bound<B>>,
+    min: Shared<Bound<B>>,
 }
 
-impl<T: Ord + Clone> Node<T> {
+impl<B: Ord + Clone, D: ToInterval<B> + Clone> Node<B, D> {
     fn new(
-        interval: Interval<T>,
-        left: Option<Shared<Node<T>>>,
-        right: Option<Shared<Node<T>>>,
-    ) -> Node<T> {
+        data: D,
+        left: Option<Shared<Node<B, D>>>,
+        right: Option<Shared<Node<B, D>>>,
+    ) -> Node<B, D> {
         let height = usize::max(Self::height(&left), Self::height(&right)) + 1;
+        let interval = data.to_interval();
         let max = Self::get_max(&interval, &left, &right);
         let min = Self::get_min(&interval, &left, &right);
         Node {
-            interval,
+            data,
             left,
             right,
             height,
@@ -76,22 +77,19 @@ impl<T: Ord + Clone> Node<T> {
         }
     }
 
-    fn leaf(interval: Interval<T>) -> Node<T> {
-        Node::new(interval, None, None)
+    fn leaf(data: D) -> Node<B, D> {
+        Node::new(data, None, None)
     }
 
-    fn height(node: &Option<Shared<Node<T>>>) -> usize {
-        match node {
-            None => 0,
-            Some(n) => n.height,
-        }
+    fn height(node: &Option<Shared<Node<B, D>>>) -> usize {
+        node.as_ref().map_or(0, |n| n.height)
     }
 
     fn get_max(
-        interval: &Interval<T>,
-        left: &Option<Shared<Node<T>>>,
-        right: &Option<Shared<Node<T>>>,
-    ) -> Shared<Bound<T>> {
+        interval: &Interval<B>,
+        left: &Option<Shared<Node<B, D>>>,
+        right: &Option<Shared<Node<B, D>>>,
+    ) -> Shared<Bound<B>> {
         let mid = &interval.high;
         match (left, right) {
             (None, None) => mid.clone(),
@@ -102,10 +100,10 @@ impl<T: Ord + Clone> Node<T> {
     }
 
     fn get_min(
-        interval: &Interval<T>,
-        left: &Option<Shared<Node<T>>>,
-        right: &Option<Shared<Node<T>>>,
-    ) -> Shared<Bound<T>> {
+        interval: &Interval<B>,
+        left: &Option<Shared<Node<B, D>>>,
+        right: &Option<Shared<Node<B, D>>>,
+    ) -> Shared<Bound<B>> {
         let mid = &interval.low;
         match (left, right) {
             (None, None) => mid.clone(),
@@ -119,26 +117,27 @@ impl<T: Ord + Clone> Node<T> {
         (Self::height(&self.left) as isize) - (Self::height(&self.right) as isize)
     }
 
-    fn insert(&self, interval: Interval<T>) -> Self {
-        let res = match interval.cmp(&self.interval) {
+    fn insert(&self, data: D) -> Self {
+        let ordering = data.to_interval().cmp(&self.data.to_interval());
+        let res = match ordering {
             Ordering::Less => {
                 let insert_left = match &self.left {
-                    None => Node::leaf(interval),
-                    Some(left_tree) => left_tree.insert(interval),
+                    None => Node::leaf(data),
+                    Some(left_tree) => left_tree.insert(data),
                 };
                 Node::new(
-                    self.interval.clone(),
+                    self.data.clone(),
                     Some(Shared::new(insert_left)),
                     self.right.clone(),
                 )
             }
             Ordering::Greater => {
                 let insert_right = match &self.right {
-                    None => Node::leaf(interval),
-                    Some(right_tree) => right_tree.insert(interval),
+                    None => Node::leaf(data),
+                    Some(right_tree) => right_tree.insert(data),
                 };
                 Node::new(
-                    self.interval.clone(),
+                    self.data.clone(),
                     self.left.clone(),
                     Some(Shared::new(insert_right)),
                 )
@@ -148,49 +147,45 @@ impl<T: Ord + Clone> Node<T> {
         res.balance()
     }
 
-    fn get_minimum(&self) -> Interval<T> {
+    fn get_minimum(&self) -> D {
         match &self.left {
-            None => self.interval.clone(),
+            None => self.data.clone(),
             Some(left_tree) => left_tree.get_minimum(),
         }
     }
 
-    fn remove(&self, interval: &Interval<T>) -> Option<Shared<Self>> {
-        let res = match interval.cmp(&self.interval) {
+    fn remove(&self, data: &D) -> Option<Shared<Self>> {
+        let ordering = data.to_interval().cmp(&self.data.to_interval());
+        let res = match ordering {
             Ordering::Equal => match (&self.left, &self.right) {
                 (None, None) => None,
                 (Some(left_tree), None) => Some(left_tree.clone()),
                 (None, Some(right_tree)) => Some(right_tree.clone()),
                 (Some(_), Some(right_tree)) => {
                     let successor = right_tree.get_minimum();
-                    let new_node = Node::new(
-                        successor.clone(),
-                        self.left.clone(),
-                        right_tree.remove(&successor),
-                    );
+                    let new_right = right_tree.remove(&successor);
+                    let new_node = Node::new(successor, self.left.clone(), new_right);
                     Some(Shared::new(new_node))
                 }
             },
             Ordering::Less => match &self.left {
                 None => Some(Shared::new(self.clone())),
-                Some(left_tree) => Some(Shared::new(self.replace_left(left_tree.remove(interval)))),
+                Some(left_tree) => Some(Shared::new(self.replace_left(left_tree.remove(data)))),
             },
             Ordering::Greater => match &self.right {
                 None => Some(Shared::new(self.clone())),
-                Some(right_tree) => {
-                    Some(Shared::new(self.replace_right(right_tree.remove(interval))))
-                }
+                Some(right_tree) => Some(Shared::new(self.replace_right(right_tree.remove(data)))),
             },
         };
         res.map(|r| Shared::new(r.balance()))
     }
 
-    fn replace_left(&self, new_left: Option<Shared<Node<T>>>) -> Node<T> {
-        Self::new(self.interval.clone(), new_left, self.right.clone())
+    fn replace_left(&self, new_left: Option<Shared<Node<B, D>>>) -> Node<B, D> {
+        Self::new(self.data.clone(), new_left, self.right.clone())
     }
 
-    fn replace_right(&self, new_right: Option<Shared<Node<T>>>) -> Node<T> {
-        Self::new(self.interval.clone(), self.left.clone(), new_right)
+    fn replace_right(&self, new_right: Option<Shared<Node<B, D>>>) -> Node<B, D> {
+        Self::new(self.data.clone(), self.left.clone(), new_right)
     }
 
     fn rotate_right(&self) -> Self {
@@ -230,13 +225,13 @@ impl<T: Ord + Clone> Node<T> {
 }
 
 /// An Iterator over Intervals matching some query
-pub struct Iter<T: Ord + Clone> {
-    stack: Vec<Shared<Node<T>>>,
-    query: Interval<T>,
+pub struct Iter<B: Ord + Clone, D: ToInterval<B> + Clone> {
+    stack: Vec<Shared<Node<B, D>>>,
+    query: Interval<B>,
 }
 
-impl<T: Ord + Clone> Iterator for Iter<T> {
-    type Item = Interval<T>;
+impl<B: Ord + Clone, D: ToInterval<B> + Clone> Iterator for Iter<B, D> {
+    type Item = D;
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.stack.pop() {
             if let Some(left_tree) = &node.left {
@@ -263,8 +258,8 @@ impl<T: Ord + Clone> Iterator for Iter<T> {
                     self.stack.push(right_tree.clone())
                 }
             }
-            if self.query.overlaps(&node.interval) {
-                return Some(node.interval.clone());
+            if self.query.overlaps(&node.data.to_interval()) {
+                return Some(node.data.clone());
             }
         }
         None
@@ -306,13 +301,17 @@ impl<T: Ord + Clone> Iterator for Iter<T> {
 /// );
 /// ```
 #[derive(Clone, Hash)]
-pub struct IntervalTree<T: Ord + Clone> {
-    root: Option<Shared<Node<T>>>,
+pub struct IntervalTree<B, D = Interval<B>>
+where
+    B: Ord + Clone,
+    D: ToInterval<B> + Clone,
+{
+    root: Option<Shared<Node<B, D>>>,
 }
 
-impl<T: Ord + Clone> IntervalTree<T> {
+impl<B: Ord + Clone, D: ToInterval<B> + Clone> IntervalTree<B, D> {
     /// Construct an empty IntervalTree
-    pub fn new() -> IntervalTree<T> {
+    pub fn new() -> IntervalTree<B, D> {
         IntervalTree { root: None }
     }
 
@@ -329,10 +328,10 @@ impl<T: Ord + Clone> IntervalTree<T> {
     ///     vec![Interval::new(Included(1), Included(2))]
     /// );
     /// ```
-    pub fn insert(&self, interval: Interval<T>) -> IntervalTree<T> {
+    pub fn insert(&self, data: D) -> IntervalTree<B, D> {
         let new_root = match &self.root {
-            None => Node::leaf(interval),
-            Some(node) => node.insert(interval),
+            None => Node::leaf(data),
+            Some(node) => node.insert(data),
         };
         IntervalTree {
             root: Some(Shared::new(new_root)),
@@ -355,11 +354,11 @@ impl<T: Ord + Clone> IntervalTree<T> {
     ///     vec![Interval::new(Included(1), Included(3))]
     /// );
     /// ```
-    pub fn remove(&self, interval: &Interval<T>) -> IntervalTree<T> {
+    pub fn remove(&self, data: &D) -> IntervalTree<B, D> {
         match &self.root {
             None => IntervalTree::new(),
             Some(node) => IntervalTree {
-                root: node.remove(interval),
+                root: node.remove(data),
             },
         }
     }
@@ -381,7 +380,7 @@ impl<T: Ord + Clone> IntervalTree<T> {
     ///     vec![Interval::new(Included(5), Unbounded)]
     /// );
     /// ```
-    pub fn query_interval(&self, interval: &Interval<T>) -> impl Iterator<Item = Interval<T>> + '_ {
+    pub fn query_interval(&self, interval: &Interval<B>) -> impl Iterator<Item = D> + '_ {
         let mut stack = Vec::new();
         if let Some(node) = &self.root {
             stack.push(node.clone())
@@ -411,7 +410,7 @@ impl<T: Ord + Clone> IntervalTree<T> {
     ///     vec![Interval::new(Included(1), Excluded(3))]
     /// );
     /// ```
-    pub fn query_point(&self, point: &T) -> impl Iterator<Item = Interval<T>> + '_ {
+    pub fn query_point(&self, point: &B) -> impl Iterator<Item = D> + '_ {
         let interval = Interval::new(Included(point.clone()), Included(point.clone()));
         self.query_interval(&interval)
     }
@@ -437,12 +436,12 @@ impl<T: Ord + Clone> IntervalTree<T> {
     ///     ]
     /// );
     /// ```
-    pub fn iter(&self) -> impl Iterator<Item = Interval<T>> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = D> + '_ {
         self.query_interval(&Interval::new(Unbounded, Unbounded))
     }
 }
 
-impl<T: Ord + Clone> Default for IntervalTree<T> {
+impl<B: Ord + Clone, D: ToInterval<B> + Clone> Default for IntervalTree<B, D> {
     fn default() -> Self {
         Self::new()
     }

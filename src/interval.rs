@@ -10,6 +10,11 @@ use std::ops::Bound::*;
 
 use crate::shared::Shared;
 
+/// Any data type used with IntervalTree must implement this trait.
+pub trait ToInterval<B: Ord + Clone> {
+    fn to_interval(&self) -> Interval<B>;
+}
+
 pub fn low_bound_cmp<T: Ord>(a: &Bound<T>, b: &Bound<T>) -> Ordering {
     match (a, b) {
         (Included(low1), Included(low2)) => low1.cmp(low2),
@@ -80,9 +85,9 @@ pub fn high_bound_max<T: Ord + Clone>(
 
 /// A data structure for representing intervals
 #[derive(Debug, Clone)]
-pub struct Interval<T: Ord + Clone> {
-    pub(crate) low: Shared<Bound<T>>,
-    pub(crate) high: Shared<Bound<T>>,
+pub struct Interval<B: Ord + Clone> {
+    pub(crate) low: Shared<Bound<B>>,
+    pub(crate) high: Shared<Bound<B>>,
 }
 
 impl<T: Ord + Clone> Interval<T> {
@@ -239,6 +244,12 @@ impl<T: Ord + Clone + Hash> Hash for Interval<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.low.hash(state);
         self.high.hash(state);
+    }
+}
+
+impl<B: Ord + Clone> ToInterval<B> for Interval<B> {
+    fn to_interval(&self) -> Interval<B> {
+        self.clone()
     }
 }
 
