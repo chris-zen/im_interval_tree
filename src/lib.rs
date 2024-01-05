@@ -43,7 +43,7 @@ use std::ops::Bound::*;
 mod interval;
 mod shared;
 
-pub use crate::interval::Interval;
+pub use crate::interval::{Interval, ToInterval};
 use crate::interval::*;
 use crate::shared::Shared;
 
