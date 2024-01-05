@@ -47,7 +47,7 @@ pub use crate::interval::{Interval, ToInterval};
 use crate::interval::*;
 use crate::shared::Shared;
 
-#[derive(Clone, Hash)]
+#[derive(Debug, Clone, Hash)]
 struct Node<B: Ord + Clone, D: ToInterval<B> + Clone> {
     data: D,
     left: Option<Shared<Node<B, D>>>,
@@ -300,7 +300,7 @@ impl<B: Ord + Clone, D: ToInterval<B> + Clone> Iterator for Iter<B, D> {
 ///     ]
 /// );
 /// ```
-#[derive(Clone, Hash)]
+#[derive(Debug, Clone, Hash)]
 pub struct IntervalTree<B, D = Interval<B>>
 where
     B: Ord + Clone,
