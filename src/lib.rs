@@ -43,8 +43,8 @@ use std::ops::Bound::*;
 mod interval;
 mod shared;
 
+use crate::interval::{high_bound_max, low_bound_min};
 pub use crate::interval::{Interval, ToInterval};
-use crate::interval::*;
 use crate::shared::Shared;
 
 #[derive(Debug, Clone, Hash)]
